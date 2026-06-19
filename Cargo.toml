@@ -1,0 +1,48 @@
+[package]
+name = "terminal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# The bootloader: turns our kernel into something a BIOS can actually boot.
+# It sets up long mode + paging and hands us a `BootInfo` (including the real
+# physical memory map, which our `mem` command reads).
+bootloader = "0.9.23"
+
+# `volatile` ensures reads/writes to the VGA buffer are not optimized away by
+# the compiler (it can't see that the memory is special hardware).
+volatile = "0.2.6"
+
+# Spinlocks. We have no OS scheduler, so a normal Mutex (which would sleep) is
+# impossible; a spinlock is the right primitive for a kernel.
+spin = "0.5.2"
+
+# Safe-ish wrappers around x86-64 CPU structures and instructions: the IDT,
+# GDT/TSS, I/O ports, and the `hlt`/interrupt-control instructions.
+x86_64 = "0.14.2"
+
+# Driver for the legacy 8259 Programmable Interrupt Controller (the PIC), which
+# delivers hardware interrupts (keyboard, timer) to the CPU.
+pic8259 = "0.10.1"
+
+# Decodes raw PS/2 keyboard scancodes into actual characters/keys.
+pc-keyboard = "0.7.0"
+
+# Lets us build statics that need run-time initialization (the IDT/GDT), using
+# a spinlock internally (`spin_no_std`) since we have no std.
+lazy_static = { version = "1.0", features = ["spin_no_std"] }
+
+# A kernel cannot unwind on panic (there is no runtime to unwind into), so both
+# profiles must abort instead.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+# Extra arguments `bootimage`/`cargo run` passes to QEMU. The `isa-debug-exit`
+# device gives the kernel a way to power off the virtual machine cleanly: when
+# the kernel writes to I/O port 0xf4, QEMU exits. Our `shutdown` command uses
+# it as a reliable fallback (the ACPI ports don't power off every QEMU build).
+[package.metadata.bootimage]
+run-args = ["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
