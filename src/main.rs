@@ -74,7 +74,9 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 /// prints diagnostic information and stops execution permanently.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    println!("PANIC: {}", info);
+    vga_buffer::set_panic_color();
+    println!("\n*** KERNEL PANIC ***");
+    println!("{}", info);
 
     // Halt the CPU forever. The `hlt` instruction puts the processor into a
     // low-power idle state until an interrupt occurs, while the surrounding

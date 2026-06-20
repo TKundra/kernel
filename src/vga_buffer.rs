@@ -242,3 +242,13 @@ pub fn _print(args: fmt::Arguments) {
         WRITER.lock().write_fmt(args).unwrap();
     });
 }
+
+/// Switch to a white-on-red color, used by the panic handler so a kernel panic
+/// is impossible to miss.
+pub fn set_panic_color() {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        WRITER.lock().color_code = ColorCode::new(Color::White, Color::Red);
+    });
+}
