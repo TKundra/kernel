@@ -24,10 +24,11 @@
 
 // Interrupt handlers require the special `x86-interrupt` calling convention,
 // which currently requires a nightly Rust feature.
-// #![feature(abi_x86_interrupt)]
+#![feature(abi_x86_interrupt)]
 
 pub mod vga_buffer;
 mod gdt;
+mod interrupts;
 
 use core::panic::PanicInfo;
 use bootloader::{entry_point, BootInfo};
@@ -44,8 +45,23 @@ entry_point!(kernel_main);
 /// since there is no operating system to return to.
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // ---- Bring up the CPU's fault/interrupt machinery ----
-    gdt::init(); // load GDT + TSS (double-fault safety stack)
 
+    // 1. Setup GDT (stack + segment setup)
+    gdt::init();
+
+    // 2. Setup IDT (interrupt handlers)
+    interrupts::init_idt();
+
+    // 3. (optional but required for keyboard/timer later)
+    // unsafe { interrupts::PICS.lock().initialize() };
+
+    // 4. Enable interrupts globally (VERY IMPORTANT)
+    x86_64::instructions::interrupts::enable();
+
+    // 👉 TEST INTERRUPT HERE
+    x86_64::instructions::interrupts::int3();
+
+    // 5. Main loop (your kernel "runtime")
     loop {}
 }
 
