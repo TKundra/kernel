@@ -29,6 +29,7 @@
 pub mod vga_buffer;
 mod gdt;
 mod interrupts;
+mod shell;
 
 use core::panic::PanicInfo;
 use bootloader::{entry_point, BootInfo};
@@ -61,10 +62,22 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // 5. Main loop (your kernel "runtime")
     // Keys arrive asynchronously via the keyboard interrupt, which fills a
     // queue. Here we drain that queue and feed each scancode to the shell.
-    println!("Type something...");
 
+    // ---- Start the shell ----
+    let mut shell = shell::Shell::new(&boot_info.memory_map);
+    shell.start();
+
+    // ---- The REPL loop ----
+    // Keys arrive asynchronously via the keyboard interrupt, which fills a
+    // queue. Here we drain that queue and feed each scancode to the shell.
     loop {
-        x86_64::instructions::hlt(); // wait for interrupts
+        match interrupts::next_scancode() {
+            // A key is waiting — process it.
+            Some(scancode) => shell.feed_scancode(scancode),
+            // Nothing to do. Atomically enable interrupts and halt the CPU so
+            // it sleeps until the next interrupt, instead of spinning hot.
+            None => x86_64::instructions::interrupts::enable_and_hlt(),
+        }
     }
 }
 

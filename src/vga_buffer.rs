@@ -169,6 +169,20 @@ impl Writer {
             }
         }
     }
+
+    /// Erase the character just before the cursor (used by the shell's
+    /// Backspace handling). Does nothing at the start of a line.
+    fn backspace(&mut self) {
+        if self.column_position > 0 {
+            self.column_position -= 1;
+            let row = BUFFER_HEIGHT - 1;
+            let col = self.column_position;
+            self.buffer.chars[row][col].write(ScreenChar {
+                ascii_character: b' ',
+                color_code: self.color_code,
+            });
+        }
+    }
 }
 
 /// Allows integration with Rust formatting macros (`write!`, `{}` formatting).
@@ -250,5 +264,48 @@ pub fn set_panic_color() {
 
     interrupts::without_interrupts(|| {
         WRITER.lock().color_code = ColorCode::new(Color::White, Color::Red);
+    });
+}
+
+// -------------------------------------------------------------------------
+// Screen helpers used by shell commands
+// -------------------------------------------------------------------------
+
+/// Clear the entire screen and move the cursor home (the `clear` command).
+pub fn clear_screen() {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        for row in 0..BUFFER_HEIGHT {
+            writer.clear_row(row);
+        }
+        writer.column_position = 0;
+    });
+}
+
+/// Erase the previous character on screen (the shell's Backspace handling).
+pub fn backspace() {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        WRITER.lock().backspace();
+    });
+}
+
+/// Print `s` in the given foreground/background, then restore the previous
+/// color. Used by the `colors` command to show off the VGA palette without
+/// permanently changing the shell's text color.
+pub fn print_colored(s: &str, foreground: Color, background: Color) {
+    use core::fmt::Write;
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        let saved = writer.color_code;
+        writer.color_code = ColorCode::new(foreground, background);
+        // `write_str` can't actually fail for our writer.
+        let _ = writer.write_str(s);
+        writer.color_code = saved;
     });
 }
