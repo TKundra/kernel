@@ -5,6 +5,10 @@
 **Goal:** understand how a bare-metal kernel is compiled and booted — and the
 real bugs we hit getting there.
 
+🎯 **Milestone:** you can explain every config file and exotic build flag, and
+*why* each one exists (each fixes a concrete bug). You've been running
+`cargo run` since Chapter 0 — now you understand what it actually does.
+
 ---
 
 ## Why a kernel needs special build setup
@@ -145,7 +149,8 @@ cargo run        # does both, then launches it in QEMU
 ```
 
 - The bootable image lands at
-  `target/x86_64-kernel/debug/bootimage-shell.bin`.
+  `target/x86_64-kernel/debug/bootimage-terminal.bin` (named after the package
+  in `Cargo.toml`, which is `terminal`).
 - `cargo run` opens a QEMU window with the banner and a `kernel>` prompt.
 - That `.bin` is a real disk image — you could write it to a USB stick and boot
   an actual PC with it.
@@ -185,6 +190,28 @@ Worth internalizing — these are *classic* bare-metal pitfalls:
 
 ---
 
+## ✅ Checkpoint — you understand the build
+
+Prove the pieces fit together:
+
+```bash
+cargo build      # compiles the kernel + core from source — no errors
+cargo bootimage  # writes target/x86_64-kernel/debug/bootimage-terminal.bin
+cargo run        # build + wrap + boot in QEMU
+```
+
+- `cargo build` succeeding means `build-std`, the custom target, and the
+  soft-float ABI are all consistent.
+- After `cargo bootimage`, confirm the disk image exists:
+  ```bash
+  ls -lh target/x86_64-kernel/debug/bootimage-terminal.bin
+  ```
+- Open `x86_64-kernel.json` and, for each non-obvious flag, say out loud which
+  bug from the table below it fixes. If you can do that, you understand the
+  build.
+
+---
+
 ## What you learned
 
 - Bare-metal builds need a custom target, `build-std`, `panic = abort`, and a
@@ -206,6 +233,20 @@ You now understand every file in `../src/`:
    shell.rs      line editing + command dispatch + commands   (Ch 6, 7)
 ```
 
-Good next projects: a **serial port** driver (a real log + automated testing), a
-**heap allocator** (then `Vec`/`String` and command history), or paging
-experiments you can drive from new shell commands.
+…and you can extend it: you added a command in [Chapter 7](07-commands.md), and
+you know the change → `cargo run` → observe loop.
+
+**Good next projects**, each a self-contained step up:
+
+1. **A serial-port driver** (writes to COM1 at port `0x3f8`). This gives you a
+   log you can capture to a file — the foundation for *automated tests* that
+   boot the kernel in QEMU and check its output.
+2. **A heap allocator** (a bump or linked-list allocator over a region from the
+   `mem` map). Once you have one, you unlock `Vec` and `String` from the `alloc`
+   crate — then add real **command history** to the shell.
+3. **Paging experiments** you drive from new shell commands: map a page, read
+   `CR3`, walk the page tables (build on `regs` and `peek`).
+
+Each one follows the same rhythm you've used all course: add to `src/`,
+`cargo run`, see it work. You're not reading about kernels anymore — you're
+building one.

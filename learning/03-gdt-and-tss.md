@@ -4,6 +4,10 @@
 **Goal:** give fatal faults a guaranteed-good stack, so a crash prints an error
 instead of silently rebooting the machine.
 
+🎯 **Milestone:** you understand the GDT → TSS → IST chain that gives the
+double-fault handler an emergency stack. This is invisible plumbing — its payoff
+shows up next chapter, when a fault prints an error instead of rebooting.
+
 ---
 
 ## The danger we're preventing
@@ -120,6 +124,38 @@ pub fn init() {
 
 `kernel_main` calls `gdt::init()` **first**, before interrupts, so the safety
 net is in place before anything can fault.
+
+---
+
+## ✅ Checkpoint — the safety net is in place
+
+This subsystem has no command of its own — it's pure plumbing that runs at boot.
+So the checkpoint is to confirm it loads cleanly and understand *where* it runs:
+
+```bash
+cargo run
+```
+
+- The kernel boots normally to the prompt. That means `gdt::init()` ran without
+  faulting. Open `src/main.rs` and confirm it's the **very first** line of
+  `kernel_main` — the safety net goes up before anything else can fail.
+- See the table you built, live:
+  ```
+  kernel> gdt
+  GDTR:
+    base  = 0x... (some address)
+    limit = ... bytes (a handful of entries: the null entry, our code
+            segment, and the 16-byte TSS descriptor)
+  ```
+  That's the `sgdt` instruction reading back the GDTR register `gdt::init()`
+  loaded — proof the GDT from this chapter is really installed.
+- The real proof of *why* this matters is in the **next** chapter: we install
+  the double-fault handler that runs on the emergency stack you just built. When
+  a fatal fault prints `EXCEPTION: DOUBLE FAULT` instead of silently rebooting,
+  that's this 20 KiB static stack doing its job.
+
+> Curious how it reads CR3 etc. live? `kernel> regs` (Chapter 7) shows the CPU's
+> low-level registers, including the segment/paging state this chapter touches.
 
 ---
 

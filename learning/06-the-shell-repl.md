@@ -4,6 +4,10 @@
 **Goal:** turn the stream of scancodes into edited lines of text, and run the
 matching command. This is the "bottom half" from Chapter 5.
 
+🎯 **Milestone:** you understand the full keystroke → edited line → command flow,
+and can see line editing (Backspace), the REPL loop, and command dispatch react
+exactly as the code says they should.
+
 ---
 
 ## The REPL loop (in `main.rs`)
@@ -222,6 +226,31 @@ fn dispatch(&self, input: &str) {
                                                                    -> dispatch
                                                                    -> reset + prompt
 ```
+
+---
+
+## ✅ Checkpoint — line editing and dispatch
+
+Run the kernel and watch each piece of the line discipline behave as written:
+
+```bash
+cargo run
+```
+
+1. **Echo + Backspace:** type `helllo`, then press **Backspace** twice and
+   retype, ending with `hello`. Watch characters appear and erase — that's
+   `push_char` echoing and `on_backspace` calling `vga_buffer::backspace()`.
+2. **Dispatch + the unknown-command arm:** type a word that isn't a command:
+   ```
+   kernel> frobnicate
+   unknown command: 'frobnicate'  (type 'help')
+   ```
+   That's the `other =>` arm of the `match` in `dispatch`.
+3. **`splitn(2, …)` keeps inner spacing:** type `echo a    b` (several spaces).
+   The output keeps the spaces — because only the *first* whitespace run splits
+   the command from its arguments.
+
+If all three behave, you've traced the full path from scancode to command.
 
 ---
 

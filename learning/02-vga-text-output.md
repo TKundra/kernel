@@ -3,6 +3,10 @@
 **Real file:** `../src/vga_buffer.rs`
 **Goal:** make text appear on screen with no OS, and rebuild `print!`/`println!`.
 
+🎯 **Milestone:** you understand that "printing" is just writing two bytes per
+character into memory at `0xb8000` — and you'll read those exact bytes back live
+with the `peek` command.
+
 ---
 
 ## The big idea: the screen is just memory
@@ -249,6 +253,43 @@ pub fn set_panic_color() {
 ```
 
 Each wraps the locked writer in `without_interrupts` just like `_print`.
+
+---
+
+## ✅ Checkpoint — printing is just memory
+
+Run the kernel and prove the screen really is memory:
+
+```bash
+cargo run
+```
+
+1. The yellow banner and `kernel>` prompt you see *are* this code running —
+   every character is two bytes written at `0xb8000`.
+2. Clear the screen (this writes blank cells to every position):
+   ```
+   kernel> clear
+   ```
+3. Now read the screen's own video memory back as raw bytes:
+   ```
+   kernel> peek 0xb8000 32
+   ```
+   You'll see pairs like `20 0e` repeating — `0x20` is the ASCII space and
+   `0x0e` is the color byte (yellow-on-black: bg `0`, fg `0xe`). **That second
+   byte is the `ColorCode` from this chapter, sitting in real memory.**
+4. Now **write** to that memory and watch the screen change instantly:
+   ```
+   kernel> poke 0xb8000 0x41
+   ```
+   An `A` appears in the top-left corner — you just stored one byte. And see the
+   whole 16-color palette this chapter describes:
+   ```
+   kernel> colors
+   ```
+
+> Experiment: open `src/vga_buffer.rs`, find the `WRITER` color
+> (`Color::Yellow, Color::Black`), change `Yellow` to `LightGreen`, then
+> `cargo run` again. The whole shell is now green. Change it back when done.
 
 ---
 

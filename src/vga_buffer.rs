@@ -235,3 +235,20 @@ pub fn set_panic_color() {
         WRITER.lock().color_code = ColorCode::new(Color::White, Color::Red);
     });
 }
+
+/// Print `s` in the given foreground/background, then restore the previous
+/// color. Used by the `colors` command to show off the VGA palette without
+/// permanently changing the shell's text color.
+pub fn print_colored(s: &str, foreground: Color, background: Color) {
+    use core::fmt::Write;
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        let saved = writer.color_code;
+        writer.color_code = ColorCode::new(foreground, background);
+        // `write_str` can't actually fail for our writer.
+        let _ = writer.write_str(s);
+        writer.color_code = saved;
+    });
+}

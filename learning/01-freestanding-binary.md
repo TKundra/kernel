@@ -4,6 +4,12 @@
 **Goal:** understand why a kernel can't look like a normal Rust program, and the
 three things every freestanding binary needs.
 
+🎯 **Milestone:** you can explain `#![no_std]`, `#![no_main]`, and the panic
+handler — and you'll *see* the panic handler fire by running the `panic` command.
+
+> You should have already booted the kernel in [Chapter 0](00-setup.md). If not,
+> do that first — this chapter explains the file you just ran.
+
 ---
 
 ## The problem
@@ -150,6 +156,35 @@ fn panic(info: &PanicInfo) -> ! {
     loop { x86_64::instructions::hlt(); }
 }
 ```
+
+---
+
+## ✅ Checkpoint — see the panic handler fire
+
+The whole kernel already builds, so let's prove *this chapter's* code works: the
+`#[panic_handler]`. Run the kernel and trigger a panic from the shell:
+
+```bash
+cargo run
+```
+
+```
+kernel> panic boom
+```
+
+You should see the screen turn into a **white-on-red** kernel panic:
+
+```
+*** KERNEL PANIC ***
+panicked at 'boom', src/shell.rs:...
+```
+
+…and the machine **halts** — the prompt never comes back. That is the `-> !`
+("never returns") in action: there's no OS to recover into, so we print the
+reason and stop the CPU. Close QEMU and reopen it to recover.
+
+> Want to see the bootloader call `kernel_main`? Open `src/main.rs` and confirm
+> there is no `fn main` anywhere — only `entry_point!(kernel_main)`.
 
 ---
 

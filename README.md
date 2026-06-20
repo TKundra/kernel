@@ -231,9 +231,18 @@ Each command is also a little lesson in a real kernel concept:
 | `mem`            | Print the real physical memory map.                   | The bootloader's memory map (`BootInfo`).      |
 | `regs`           | Dump CR0/CR2/CR3/CR4 + RFLAGS.                        | Control registers; paging root; interrupt flag.|
 | `cpuid`          | Show CPU vendor and feature flags.                    | The `cpuid` instruction.                       |
+| `tsc`            | Read the CPU timestamp counter.                       | `rdtsc`; the cycle-accurate counter.           |
 | `uptime`         | Time since boot.                                      | The timer interrupt as a clock.                |
+| `sleep <ticks>`  | Wait N timer ticks (~18 = 1s), using `hlt`.           | Waiting without a scheduler; the idle pattern. |
+| `time`           | Wall-clock time from the RTC chip.                    | The CMOS real-time clock; BCD; port I/O.       |
+| `colors`         | Show all 16 VGA text colors.                          | The 4-bit VGA color palette.                   |
+| `gdt`            | Show the GDT register (base + limit).                 | `sgdt`; the descriptor table from boot.        |
+| `idt`            | Show the IDT register (base + limit).                 | `sidt`; the interrupt table from boot.         |
 | `int3`           | Fire a breakpoint exception and **recover**.          | Exceptions are recoverable, unlike panics.     |
 | `peek <hex> [n]` | Hex-dump `n` bytes from a memory address.             | Raw memory access; the page-fault handler.     |
+| `poke <hex> <b>` | Write byte `b` (hex) to a memory address.             | Raw memory writes (try it on VGA memory).      |
+| `inb <port>`     | Read a byte from an I/O port.                          | Port-mapped I/O (the `in` instruction).        |
+| `outb <port> <b>`| Write a byte to an I/O port (careful!).               | Port-mapped I/O (the `out` instruction).       |
 | `reboot`         | Reset the machine (8042 controller, port 0x64).       | Port I/O; the legacy keyboard controller.      |
 | `shutdown`       | Power off (ACPI ports + QEMU debug-exit).             | ACPI power management; I/O ports.              |
 | `panic [msg]`    | Trigger a real kernel panic (red banner, then halt).  | The panic path; halting the CPU.               |
@@ -246,8 +255,13 @@ Things to try:
 ```
 kernel> regs            # see paging (CR3) and the interrupt flag
 kernel> cpuid           # who made this CPU?
+kernel> colors          # the 16-color VGA palette
 kernel> peek 0xb8000 32 # peek at the screen's own video memory
+kernel> poke 0xb8000 0x41  # write 'A' straight into the top-left cell
+kernel> inb 0x64        # read the keyboard controller's status port
+kernel> time            # ask the RTC chip for the wall-clock time
 kernel> int3            # raise an exception... and survive it
+kernel> sleep 18        # pause ~1 second, then return
 kernel> uptime          # the timer has been ticking ~18 times a second
 ```
 
@@ -281,7 +295,7 @@ cargo run            # build the image AND launch it in QEMU
 Type commands; try `help`, `mem`, `echo hi`, `panic`.
 
 The bootable image is written to:
-`target/x86_64-kernel/debug/bootimage-shell.bin` — you can also write it to a
+`target/x86_64-kernel/debug/bootimage-terminal.bin` — you can also write it to a
 USB stick and boot a real PC with it.
 
 ---

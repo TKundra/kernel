@@ -4,6 +4,10 @@
 **Goal:** install the table that tells the CPU which function to run for each
 exception, and write three handlers: breakpoint, double fault, page fault.
 
+🎯 **Milestone:** you can make the CPU raise an exception on purpose (`int3`) and
+watch the kernel **handle it and keep running** — proving an exception is a
+detour, not a crash.
+
 ---
 
 ## What an interrupt is
@@ -148,6 +152,53 @@ println!("...and we're back!");             // we DID return — proof it recove
 ```
 
 The fact that the second line prints proves the handler ran and returned.
+
+---
+
+## ✅ Checkpoint — survive an exception
+
+Run the kernel and fire a breakpoint exception on demand:
+
+```bash
+cargo run
+```
+
+```
+kernel> int3
+```
+
+You should see all three lines:
+
+```
+triggering a breakpoint exception (int3)...
+EXCEPTION: BREAKPOINT
+InterruptStackFrame { ... instruction_pointer ... }
+...and we're back! the exception was handled and recovered.
+```
+
+The last line is the whole point: the handler **returned**, and execution
+continued. Compare with `kernel> panic` (Chapter 1), which never returns. Same
+machinery (the IDT), opposite outcome — recoverable vs fatal.
+
+You can also see the table itself:
+
+```
+kernel> idt
+IDTR:
+  base  = 0x...
+  limit = 4095 bytes (256 entries)
+```
+
+That's `sidt` reading back the IDTR register `init_idt()` loaded. The limit is
+`4095` because each of the 256 vectors is a 16-byte descriptor in 64-bit mode
+(`256 * 16 = 4096`, and the limit is size − 1).
+
+> Want to see the page-fault handler too? Use `peek` (Chapter 7) to read a high
+> address far beyond installed RAM — e.g. `kernel> peek 0xffff800000000000 8`.
+> Touching unmapped memory raises a page fault, and you get a clean
+> `EXCEPTION: PAGE FAULT` report with the faulting address (then a panic),
+> instead of a silent reboot — precisely because Chapter 3's emergency stack and
+> this chapter's handler are in place.
 
 ---
 

@@ -4,6 +4,9 @@
 **Goal:** get the PIC delivering timer and keyboard interrupts, and build a
 keyboard driver that hands keystrokes to the shell without deadlocking.
 
+🎯 **Milestone:** the two ways the outside world reaches the kernel come alive —
+the **keyboard** (so you can type at all) and the **timer** (so `uptime` counts).
+
 ---
 
 ## The PIC: how devices reach the CPU
@@ -206,6 +209,40 @@ interrupts-off = guaranteed mutual exclusion.
       v
    shell.feed_scancode(scancode)  -> decode + line edit + run command
 ```
+
+---
+
+## ✅ Checkpoint — hardware is talking to the kernel
+
+Run the kernel and exercise both interrupts:
+
+```bash
+cargo run
+```
+
+1. **Keyboard interrupt:** just type. The fact that characters appear at the
+   prompt at all means the full path works — keypress → IRQ1 → ISR → queue →
+   main loop → shell. (Before this chapter, the kernel was deaf.)
+2. **Timer interrupt:** run `uptime` twice, a few seconds apart:
+   ```
+   kernel> uptime
+   uptime: 142 ticks  (~7.8 seconds at ~18.2 Hz)
+   kernel> uptime
+   uptime: 230 ticks  (~12.6 seconds at ~18.2 Hz)
+   ```
+   The tick count **grows on its own**, even when you're not typing. That's the
+   timer interrupt firing ~18 times a second and bumping the `AtomicU64` counter.
+
+3. **The timer as a wait source:** `sleep` uses these same ticks to pause:
+   ```
+   kernel> sleep 18
+   sleeping 18 ticks...
+   awake after 18 ticks
+   ```
+   It takes about a second — because the timer delivers ~18 ticks per second.
+
+If typing works and `uptime`/`sleep` behave, both hardware interrupts are live
+and sending their EOIs correctly.
 
 ---
 
