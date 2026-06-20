@@ -53,16 +53,19 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     interrupts::init_idt();
 
     // 3. (optional but required for keyboard/timer later)
-    // unsafe { interrupts::PICS.lock().initialize() };
+    unsafe { interrupts::PICS.lock().initialize() };
 
     // 4. Enable interrupts globally (VERY IMPORTANT)
     x86_64::instructions::interrupts::enable();
 
-    // 👉 TEST INTERRUPT HERE
-    x86_64::instructions::interrupts::int3();
-
     // 5. Main loop (your kernel "runtime")
-    loop {}
+    // Keys arrive asynchronously via the keyboard interrupt, which fills a
+    // queue. Here we drain that queue and feed each scancode to the shell.
+    println!("Type something...");
+
+    loop {
+        x86_64::instructions::hlt(); // wait for interrupts
+    }
 }
 
 /// Called whenever the kernel encounters an unrecoverable error.
