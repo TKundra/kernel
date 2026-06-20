@@ -37,6 +37,16 @@ use crate::{interrupts, print, println, vga_buffer};
 /// are ignored until the user presses Enter or removes characters.
 const MAX_LINE: usize = 128;
 
+/// Return "yes"/"no" for whether bit `n` is set in `value`. Used to print
+/// CPU feature flags readably in the `cpuid` command.
+fn bit(value: u32, n: u32) -> &'static str {
+    if value & (1 << n) != 0 {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
 /// Represents the entire runtime state of the shell.
 ///
 /// The shell must remember:
@@ -339,6 +349,15 @@ impl Shell {
             "echo" => println!("{}", args),          // Print the provided argument string to the screen
             "reboot" => self.cmd_reboot(),         // Attempt to reboot the system
             "shutdown" => self.cmd_shutdown(),     // Attempt to shut down the system
+            "mem" => self.cmd_mem(),               // Display memory map information from the bootloader
+            "cpuid" => self.cmd_cpuid(),           // Display CPU identification (vendor, features, etc.)
+            "tsc" => self.cmd_tsc(),               // Read and display CPU Time Stamp Counter value
+            "uptime" => self.cmd_uptime(),         // Show elapsed time since kernel boot
+            "sleep" => self.cmd_sleep(args),       // Busy-wait or delay execution for given duration
+            "time" => self.cmd_time(),             // Display current system/kernel time information
+            "colors" => self.cmd_colors(),         // Demonstrate VGA color palette output
+            "peek" => self.cmd_peek(args),         // Read memory from a specified address
+            "int3" => self.cmd_int3(),             // Trigger software breakpoint interrupt (INT3)
             "panic" => self.cmd_panic(args),       // Deliberately trigger a kernel panic
             other => {
                 println!("unknown command: '{}'  (type 'help')", other); // Handle unknown commands with a fallback message
@@ -354,6 +373,15 @@ impl Shell {
         println!("  echo <text>     print the given text back");
         println!("  reboot          reset the machine");
         println!("  shutdown        power off (QEMU/ACPI)");
+        println!("  mem             show the real physical memory map");
+        println!("  cpuid           show CPU vendor and features");
+        println!("  tsc             read the CPU timestamp counter (cycles)");
+        println!("  uptime          time since boot (from the timer interrupt)");
+        println!("  sleep <ticks>   wait n timer ticks (~18 ticks = 1 second)");
+        println!("  time            wall-clock time from the RTC (CMOS clock)");
+        println!("  colors          show the 16 VGA text colors");
+        println!("  peek <hex> [n]  read n bytes from a memory address");
+        println!("  int3            fire a breakpoint exception and recover");
         println!("  panic [msg]     trigger a kernel panic (halts the CPU)");
     }
 
@@ -446,5 +474,340 @@ impl Shell {
         loop {
             x86_64::instructions::hlt();
         }
+    }
+
+    /// `mem` — display the physical memory map provided by the bootloader.
+    ///
+    /// This memory map comes directly from the bootloader’s firmware queries
+    /// (e.g., E820 on BIOS systems or UEFI memory descriptors).
+    /// Each entry describes a physical address range and its type:
+    /// - Usable RAM (safe for allocation)
+    /// - Reserved regions (firmware / hardware)
+    /// - Kernel / bootloader memory
+    /// - ACPI tables, etc.
+    ///
+    /// This is the authoritative view of physical memory layout.
+    fn cmd_mem(&self) {
+        println!("physical memory map (from bootloader):");
+
+        let mut usable: u64 = 0;
+
+        for region in self.memory_map.iter() {
+            let start = region.range.start_addr();
+            let end = region.range.end_addr();
+
+            println!(
+                "  {:#012x} - {:#012x}  {:?}",
+                start, end, region.region_type
+            );
+
+            // Only "Usable" regions can be used by a physical memory allocator.
+            if region.region_type == bootloader::bootinfo::MemoryRegionType::Usable {
+                usable += end - start;
+            }
+        }
+
+        // Convert to KiB for human-readable output.
+        println!("  usable RAM: {} KiB", usable / 1024);
+    }
+
+    /// `cpuid` — query CPU capabilities using the CPUID instruction.
+    ///
+    /// CPUID is the standard x86 mechanism for discovering CPU information.
+    /// Input:
+    ///   - EAX = "leaf" (function selector)
+    /// Output:
+    ///   - EAX, EBX, ECX, EDX contain feature/vendor data depending on leaf.
+    ///
+    /// Leaf 0 returns:
+    ///   - EBX + EDX + ECX = 12-byte CPU vendor string
+    ///   - EAX = highest supported CPUID leaf
+    ///
+    /// Leaf 1 returns:
+    ///   - Feature flags in EDX (legacy feature bitmap)
+    fn cmd_cpuid(&self) {
+        use core::arch::x86_64::__cpuid;
+
+        // Leaf 0: vendor ID + max supported leaf
+        let leaf0 = __cpuid(0);
+
+        // Vendor string is stored as three 32-bit registers:
+        // EBX, EDX, ECX (in that order).
+        let mut vendor = [0u8; 12];
+
+        vendor[0..4].copy_from_slice(&leaf0.ebx.to_le_bytes());
+        vendor[4..8].copy_from_slice(&leaf0.edx.to_le_bytes());
+        vendor[8..12].copy_from_slice(&leaf0.ecx.to_le_bytes());
+
+        let vendor = core::str::from_utf8(&vendor).unwrap_or("?");
+
+        println!("CPU vendor: {}", vendor);
+        println!("max cpuid leaf: {}", leaf0.eax);
+
+        // Leaf 1: legacy feature flags (EDX bitfield)
+        let leaf1 = __cpuid(1);
+        let edx = leaf1.edx;
+
+        println!("features:");
+        println!("  FPU   (x87 float)  : {}", bit(edx, 0));
+        println!("  TSC   (timestamp)  : {}", bit(edx, 4));
+        println!("  APIC  (local APIC) : {}", bit(edx, 9));
+        println!("  SSE                : {}", bit(edx, 25));
+        println!("  SSE2               : {}", bit(edx, 26));
+    }
+
+    /// `tsc` — read the Time Stamp Counter (TSC).
+    ///
+    /// The TSC is a 64-bit CPU register that increments at (roughly) every CPU
+    /// cycle. It is the highest-resolution timing source available directly from
+    /// the processor.
+    ///
+    /// It is useful for:
+    /// - benchmarking code
+    /// - measuring short time intervals
+    /// - profiling low-level kernel paths
+    fn cmd_tsc(&self) {
+        // rdtsc reads the CPU's timestamp counter.
+        let cycles = unsafe { core::arch::x86_64::_rdtsc() };
+
+        println!("timestamp counter: {} cycles since CPU reset", cycles);
+        println!("(run again — value always increases)");
+    }
+
+    /// `uptime` — system uptime derived from the PIT timer interrupt.
+    ///
+    /// This uses the periodic timer interrupt (≈18.2 Hz in legacy PIT mode),
+    /// which increments a global tick counter.
+    ///
+    /// Compared to TSC:
+    /// - TSC: high precision, CPU-cycle based
+    /// - ticks: low precision, interrupt-based
+    fn cmd_uptime(&self) {
+        let ticks = interrupts::ticks();
+
+        // Convert ticks → tenths of seconds using integer arithmetic.
+        let tenths = ticks * 10 / interrupts::TIMER_HZ_X10;
+
+        println!(
+            "uptime: {} ticks  (~{}.{} seconds at ~18.2 Hz)",
+            ticks,
+            tenths / 10,
+            tenths % 10
+        );
+    }
+
+    /// `sleep <ticks>` — busy-wait using `hlt` until timer ticks advance.
+    ///
+    /// There is no scheduler yet, so “sleeping” means:
+    /// - wait for timer interrupts
+    /// - halt CPU between interrupts to avoid busy spinning
+    fn cmd_sleep(&self, args: &str) {
+        let n: u64 = match args.trim().parse() {
+            Ok(value) => value,
+            Err(_) => {
+                println!("usage: sleep <ticks> (~18 ticks = 1 second)");
+                return;
+            }
+        };
+
+        // Prevent accidental long stalls from huge inputs.
+        let n = n.min(100_000);
+
+        let start = interrupts::ticks();
+        let target = start + n;
+
+        println!("sleeping {} ticks...", n);
+
+        while interrupts::ticks() < target {
+            // HLT pauses CPU until next interrupt (power-efficient idle loop)
+            x86_64::instructions::hlt();
+        }
+
+        println!("awake after {} ticks", interrupts::ticks() - start);
+    }
+
+    /// `time` — read current time from the CMOS Real-Time Clock (RTC).
+    ///
+    /// The RTC is a battery-backed hardware clock present in legacy PC systems.
+    /// It is accessed through I/O ports:
+    /// - 0x70: register selector
+    /// - 0x71: data port
+    ///
+    /// Many RTC values are stored in BCD (Binary-Coded Decimal).
+    fn cmd_time(&self) {
+        use x86_64::instructions::port::Port;
+
+        // Read a CMOS register via ports 0x70/0x71.
+        fn read_cmos(reg: u8) -> u8 {
+            let mut addr: Port<u8> = Port::new(0x70);
+            let mut data: Port<u8> = Port::new(0x71);
+
+            unsafe {
+                addr.write(reg);
+                data.read()
+            }
+        }
+
+        // Wait until RTC is not updating (prevents inconsistent reads).
+        while read_cmos(0x0A) & 0x80 != 0 {}
+
+        let second = read_cmos(0x00);
+        let minute = read_cmos(0x02);
+        let hour_raw = read_cmos(0x04);
+        let day = read_cmos(0x07);
+        let month = read_cmos(0x08);
+        let year = read_cmos(0x09);
+        let status_b = read_cmos(0x0B);
+
+        // Decode RTC format flags:
+        let is_bcd = status_b & 0x04 == 0;
+        let is_24h = status_b & 0x02 != 0;
+
+        // Convert BCD → binary if needed.
+        let from_bcd = |v: u8| {
+            if is_bcd {
+                (v >> 4) * 10 + (v & 0x0f)
+            } else {
+                v
+            }
+        };
+
+        // Handle 12-hour mode (PM bit stored in MSB of hour register).
+        let pm = !is_24h && (hour_raw & 0x80 != 0);
+        let mut hour = from_bcd(hour_raw & 0x7f);
+
+        if pm && hour != 12 {
+            hour += 12;
+        }
+
+        println!(
+            "RTC time (UTC): 20{:02}-{:02}-{:02} {:02}:{:02}:{:02}",
+            from_bcd(year),
+            from_bcd(month),
+            from_bcd(day),
+            hour,
+            from_bcd(minute),
+            from_bcd(second),
+        );
+    }
+
+    /// `colors` — display VGA text-mode 16-color palette.
+    ///
+    /// VGA text mode uses a 4-bit color index:
+    /// - 0–15 represent fixed hardware-defined colors
+    /// - each entry controls foreground/background text colors
+    fn cmd_colors(&self) {
+        use vga_buffer::Color::*;
+
+        let palette = [
+            (Black, "Black"),
+            (Blue, "Blue"),
+            (Green, "Green"),
+            (Cyan, "Cyan"),
+            (Red, "Red"),
+            (Magenta, "Magenta"),
+            (Brown, "Brown"),
+            (LightGray, "LightGray"),
+            (DarkGray, "DarkGray"),
+            (LightBlue, "LightBlue"),
+            (LightGreen, "LightGreen"),
+            (LightCyan, "LightCyan"),
+            (LightRed, "LightRed"),
+            (Pink, "Pink"),
+            (Yellow, "Yellow"),
+            (White, "White"),
+        ];
+
+        println!("VGA text-mode palette (16 colors, 4-bit):");
+
+        for (color, name) in palette {
+            print!("  ");
+
+            // Color swatch using background color
+            vga_buffer::print_colored("    ", vga_buffer::Color::Black, color);
+
+            print!(" ");
+
+            // Label rendered in its own color
+            vga_buffer::print_colored(name, color, vga_buffer::Color::Black);
+
+            println!("  (code {})", color as u8);
+        }
+    }
+
+    /// `int3` — execute the one-byte `int3` instruction, which raises a
+    /// breakpoint exception. The key lesson: our breakpoint handler prints and
+    /// RETURNS, so execution continues normally afterwards. Contrast with
+    /// `panic`, which never returns. This is how exceptions differ from crashes.
+    fn cmd_int3(&self) {
+        println!("triggering a breakpoint exception (int3)...");
+        x86_64::instructions::interrupts::int3();
+        println!("...and we're back! the exception was handled and recovered.");
+    }
+
+    /// `peek <hex> [n]` — read `n` bytes (default 16) starting at a memory
+    /// address and print them as a hex dump. Demonstrates raw memory access.
+    /// Reading an unmapped address triggers our page-fault handler.
+    fn cmd_peek(&self, args: &str) {
+        let mut parts = args.split_whitespace();
+
+        // Parse the address (accepts an optional "0x" prefix).
+        let addr_str = parts.next().unwrap_or("");
+        let addr_str = addr_str.strip_prefix("0x").unwrap_or(addr_str);
+        let addr = match u64::from_str_radix(addr_str, 16) {
+            Ok(value) => value,
+            Err(_) => {
+                println!("usage: peek <hex-address> [count]   e.g. peek 0xb8000 32");
+                return;
+            }
+        };
+
+        // Parse the optional byte count (decimal), default 16, capped at 256.
+        let count: u64 = parts
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16)
+            .min(256);
+
+        println!("memory at {:#x}:", addr);
+        for row in 0..count.div_ceil(16) {
+            let base = addr + row * 16;
+            print!("  {:#012x}: ", base);
+            for col in 0..16 {
+                if row * 16 + col >= count {
+                    break;
+                }
+                // SAFETY: a bad address faults into our page-fault handler
+                // rather than silently corrupting anything.
+                let byte = unsafe { core::ptr::read_volatile((base + col) as *const u8) };
+                print!("{:02x} ", byte);
+            }
+            println!();
+        }
+    }
+
+
+
+
+
+
+    /// `gdt` — show the Global Descriptor Table register (GDTR). `sgdt` asks the
+    /// CPU where the GDT we built in Chapter 3 lives and how big it is. Each
+    /// normal entry is 8 bytes (the TSS entry is 16).
+    fn cmd_gdt(&self) {
+        let p = x86_64::instructions::tables::sgdt();
+        println!("GDTR:");
+        println!("  base  = {:#018x}", p.base.as_u64());
+        println!("  limit = {} bytes (~{} entries)", p.limit, (p.limit as usize + 1) / 8);
+    }
+
+    /// `idt` — show the Interrupt Descriptor Table register (IDTR). `sidt` asks
+    /// the CPU where the IDT we installed in Chapter 4 lives. In 64-bit mode each
+    /// entry is 16 bytes, so a full table (256 vectors) is 4096 bytes.
+    fn cmd_idt(&self) {
+        let p = x86_64::instructions::tables::sidt();
+        println!("IDTR:");
+        println!("  base  = {:#018x}", p.base.as_u64());
+        println!("  limit = {} bytes ({} entries)", p.limit, (p.limit as usize + 1) / 16);
     }
 }
