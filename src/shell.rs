@@ -24,9 +24,9 @@
 //! and command parsing operates directly on string slices (`&str`).
 //! No heap allocations (`String`, `Vec`, etc.) are required.
 
-use bootloader::BootInfo;
 use bootloader::bootinfo::MemoryMap;
-use pc_keyboard::{DecodedKey, HandleControl, KeyCode::C, Keyboard, ScancodeSet1, layouts};
+use bootloader::BootInfo;
+use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
 
 use crate::{interrupts, print, println, vga_buffer};
 
@@ -83,10 +83,10 @@ impl Shell {
             keyboard: Keyboard::new(
                 ScancodeSet1::new(),
                 layouts::Us104Key,
-                HandleControl::Ignore // Ignore special handling for Ctrl combinations. Ctrl+C will simply be decoded as a key  instead of triggering terminal-like behavior.
+                HandleControl::Ignore, // Ignore special handling for Ctrl combinations. Ctrl+C will simply be decoded as a key  instead of triggering terminal-like behavior.
             ),
-            line: [0; MAX_LINE],      // Initialize the command buffer with zeros.
-            len: 0,                   // No characters have been entered yet.
+            line: [0; MAX_LINE], // Initialize the command buffer with zeros.
+            len: 0,              // No characters have been entered yet.
             memory_map,
         }
     }
@@ -128,7 +128,6 @@ impl Shell {
         // Some keys require multiple bytes before a complete
         // key event can be generated.
         if let Ok(Some(key_event)) = self.keyboard.add_byte(scancode) {
-
             // Convert the key event into a higher-level key representation.
             if let Some(key) = self.keyboard.process_keyevent(key_event) {
                 match key {
@@ -335,14 +334,14 @@ impl Shell {
         //
         // Each command corresponds to a dedicated handler method.
         match command {
-            "help" => self.cmd_help(),
-
-            // Unknown command fallback.
+            "help" => self.cmd_help(),             // Show available shell commands and usage help
+            "clear" => vga_buffer::clear_screen(), // Clear the VGA text buffer and reset display state
+            "echo" => println!("{}", args),          // Print the provided argument string to the screen
+            "reboot" => self.cmd_reboot(),         // Attempt to reboot the system
+            "shutdown" => self.cmd_shutdown(),     // Attempt to shut down the system
+            "panic" => self.cmd_panic(args),       // Deliberately trigger a kernel panic
             other => {
-                println!(
-                    "unknown command: '{}'  (type 'help')",
-                    other
-                );
+                println!("unknown command: '{}'  (type 'help')", other); // Handle unknown commands with a fallback message
             }
         }
     }
@@ -351,5 +350,101 @@ impl Shell {
     fn cmd_help(&self) {
         println!("available commands:");
         println!("  help            show this help text");
+        println!("  clear           clear the screen");
+        println!("  echo <text>     print the given text back");
+        println!("  reboot          reset the machine");
+        println!("  shutdown        power off (QEMU/ACPI)");
+        println!("  panic [msg]     trigger a kernel panic (halts the CPU)");
+    }
+
+    // -----------------------------------------------------------------------------
+    // Available functions
+    // -----------------------------------------------------------------------------
+
+    /// `panic` — deliberately trigger a kernel panic.
+    ///
+    /// In a bare-metal environment (no OS), `panic!` does not unwind to an OS
+    /// handler like in user-space programs. Instead, it invokes the kernel’s
+    /// panic handler, which typically prints diagnostic information (often in
+    /// a highlighted color) and halts execution permanently.
+    ///
+    /// Since there is no higher-level system to recover to, execution cannot
+    /// continue after this point.
+    fn cmd_panic(&self, args: &str) -> ! {
+        if args.is_empty() {
+            panic!("manual panic triggered from the shell");
+        } else {
+            panic!("{}", args);
+        }
+    }
+
+    /// `reboot` — perform a CPU reset via the legacy 8042 keyboard controller.
+    ///
+    /// On classic x86 hardware, the 8042 controller (commonly used for keyboard
+    /// input) also exposes a reset command. Writing `0xFE` to I/O port `0x64`
+    /// triggers a hardware reset pulse, effectively rebooting the machine.
+    ///
+    /// This method is widely used in bare-metal OS development because it works
+    /// without needing ACPI or chipset-specific reset registers.
+    fn cmd_reboot(&self) -> ! {
+        use x86_64::instructions::port::Port;
+
+        println!("rebooting...");
+
+        // The command port of the 8042 controller
+        let mut port: Port<u8> = Port::new(0x64);
+
+        unsafe {
+            // 0xFE = "Pulse CPU reset line"
+            port.write(0xFEu8);
+        }
+
+        // If the reset does not occur (e.g., emulator quirks), we must not
+        // continue executing arbitrary code. Instead, halt the CPU safely.
+        loop {
+            x86_64::instructions::hlt();
+        }
+    }
+
+    /// `shutdown` — attempt to power off the system using ACPI S5 ("soft off").
+    ///
+    /// Unlike rebooting, powering off a machine is not standardized at the
+    /// simple I/O level on x86. The modern mechanism is ACPI (Advanced
+    /// Configuration and Power Interface), which defines system states such as:
+    /// - S0: working state
+    /// - S5: soft-off (system is effectively powered down)
+    ///
+    /// Different firmware/VM implementations expose different I/O ports for
+    /// triggering S5. Here we attempt multiple commonly used ports so that at
+    /// least one works across QEMU and some legacy firmware setups.
+    ///
+    /// In a production kernel, the correct approach is to parse ACPI tables
+    /// (FADT/PM1a control blocks) and use the platform-defined shutdown port.
+    fn cmd_shutdown(&self) -> ! {
+        use x86_64::instructions::port::Port;
+
+        println!("shutting down...");
+
+        // Try multiple known ACPI power management ports (varies by system/VM)
+        for port_addr in [0x604u16, 0xB004, 0x4004] {
+            let mut port: Port<u16> = Port::new(port_addr);
+            unsafe {
+                // 0x2000 is commonly associated with entering ACPI S5 state
+                port.write(0x2000u16);
+            }
+        }
+
+        // QEMU-specific fallback:
+        // The `isa-debug-exit` device allows the VM to terminate when written to.
+        let mut debug_exit: Port<u32> = Port::new(0xf4);
+        unsafe {
+            debug_exit.write(0x10u32);
+        }
+
+        // If none of the shutdown methods worked (e.g., real hardware without
+        // matching ACPI configuration), ensure we do not continue execution.
+        loop {
+            x86_64::instructions::hlt();
+        }
     }
 }
