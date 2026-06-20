@@ -1,0 +1,26 @@
+# Cargo configuration for building and running the kernel.
+
+[build]
+# Build for our custom bare-metal target by default, so a plain `cargo build`
+# produces a freestanding kernel instead of a normal Linux binary. We use a
+# custom target (rather than the built-in `x86_64-unknown-none`) so the kernel
+# is linked as a NON position-independent executable at a fixed high address —
+# the built-in target produces a PIE linked at address 0, which the 0.9
+# bootloader cannot map (it overlaps low memory).
+target = "x86_64-kernel.json"
+
+[unstable]
+# There is no precompiled `core` for our bare-metal target, so Cargo must
+# compile it from source ("build-std"). `compiler-builtins-mem` gives us
+# memcpy/memset/etc. that the compiler expects to exist.
+build-std = ["core", "compiler_builtins"]
+build-std-features = ["compiler-builtins-mem"]
+
+# Recent nightlies require explicitly opting in to JSON target spec files.
+json-target-spec = true
+
+[target.'cfg(target_os = "none")']
+
+# `cargo run` will hand the built kernel to `bootimage runner`, which wraps it
+# in a bootloader, produces a bootable disk image, and launches it in QEMU.
+runner = "bootimage runner"

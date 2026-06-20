@@ -1,0 +1,6 @@
+# Pin this project to nightly Rust. Bare-metal kernels need unstable features
+# (the `x86-interrupt` ABI, `build-std`, etc.) that are only available on
+# nightly. The listed components are required to build a custom target.
+[toolchain]
+channel = "nightly"
+components = ["rust-src", "llvm-tools-preview"]

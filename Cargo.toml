@@ -1,0 +1,48 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Loads the kernel from BIOS, switches the CPU into 64-bit mode, sets up basic
+# memory management, and passes startup information (such as the memory map)
+# to the kernel.
+bootloader = "0.9.23"
+
+# Used when reading from or writing to hardware memory (e.g. the VGA screen).
+# Without this, the compiler might remove accesses it thinks are unnecessary.
+volatile = "0.2.6"
+
+# Simple lock implementation for sharing data safely. Since a kernel has no
+# operating-system scheduler yet, we use spinlocks instead of normal mutexes.
+spin = "0.5.2"
+
+# Provides safe Rust wrappers around common x86-64 CPU features such as
+# interrupt tables, CPU instructions, and hardware I/O ports.
+x86_64 = "0.14.2"
+
+# Driver for the legacy Programmable Interrupt Controller (PIC), which notifies
+# the CPU when hardware devices like the keyboard or timer need attention.
+pic8259 = "0.10.1"
+
+# Converts raw keyboard signals (scancodes) into keys and characters.
+pc-keyboard = "0.7.0"
+
+# Allows global variables to be initialized when first used instead of at
+# compile time. Useful for structures such as the IDT and GDT.
+lazy_static = { version = "1.0", features = ["spin_no_std"] }
+
+# A kernel cannot recover from a panic, so immediately stop execution instead
+# of attempting stack unwinding.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+# Extra QEMU settings used when running the kernel.
+#
+# The isa-debug-exit device lets the kernel tell QEMU to quit by writing to
+# I/O port 0xf4. This gives us a reliable way to shut down the virtual machine.
+[package.metadata.bootimage]
+run-args = ["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
