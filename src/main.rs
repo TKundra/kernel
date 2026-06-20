@@ -27,6 +27,7 @@
 // #![feature(abi_x86_interrupt)]
 
 pub mod vga_buffer;
+mod gdt;
 
 use core::panic::PanicInfo;
 use bootloader::{entry_point, BootInfo};
@@ -42,9 +43,8 @@ entry_point!(kernel_main);
 /// physical memory map. The `!` return type means this function never returns,
 /// since there is no operating system to return to.
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
-    println!("Hello VGA world!");
-    println!("This is a bare-metal kernel.");
-    println!("Numbers: {} {}", 42, 1337);
+    // ---- Bring up the CPU's fault/interrupt machinery ----
+    gdt::init(); // load GDT + TSS (double-fault safety stack)
 
     loop {}
 }
@@ -56,7 +56,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("PANIC: {}", info);
-    
+
     // Halt the CPU forever. The `hlt` instruction puts the processor into a
     // low-power idle state until an interrupt occurs, while the surrounding
     // loop prevents execution from continuing.
