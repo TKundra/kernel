@@ -25,7 +25,6 @@
 //! No heap allocations (`String`, `Vec`, etc.) are required.
 
 use bootloader::bootinfo::MemoryMap;
-use bootloader::BootInfo;
 use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
 
 use crate::{interrupts, print, println, vga_buffer};
@@ -784,30 +783,5 @@ impl Shell {
             }
             println!();
         }
-    }
-
-
-
-
-
-
-    /// `gdt` — show the Global Descriptor Table register (GDTR). `sgdt` asks the
-    /// CPU where the GDT we built in Chapter 3 lives and how big it is. Each
-    /// normal entry is 8 bytes (the TSS entry is 16).
-    fn cmd_gdt(&self) {
-        let p = x86_64::instructions::tables::sgdt();
-        println!("GDTR:");
-        println!("  base  = {:#018x}", p.base.as_u64());
-        println!("  limit = {} bytes (~{} entries)", p.limit, (p.limit as usize + 1) / 8);
-    }
-
-    /// `idt` — show the Interrupt Descriptor Table register (IDTR). `sidt` asks
-    /// the CPU where the IDT we installed in Chapter 4 lives. In 64-bit mode each
-    /// entry is 16 bytes, so a full table (256 vectors) is 4096 bytes.
-    fn cmd_idt(&self) {
-        let p = x86_64::instructions::tables::sidt();
-        println!("IDTR:");
-        println!("  base  = {:#018x}", p.base.as_u64());
-        println!("  limit = {} bytes ({} entries)", p.limit, (p.limit as usize + 1) / 16);
     }
 }
